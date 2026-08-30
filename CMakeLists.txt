@@ -41,6 +41,8 @@ add_executable(AgenticAI
     src/agent/LlamaManager.cpp
     src/agent/ToolRegistry.h
     src/agent/ToolRegistry.cpp
+    src/agent/WorkspaceIndexer.h
+    src/agent/WorkspaceIndexer.cpp
     src/agent/tools/DocumentTools.h
     src/agent/tools/DocumentTools.cpp
     src/agent/tools/ImageTools.h

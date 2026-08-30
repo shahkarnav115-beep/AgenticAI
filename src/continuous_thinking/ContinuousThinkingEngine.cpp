@@ -71,6 +71,18 @@ QString ContinuousThinkingEngine::cleanResponseText(const QString &rawText) {
     static QRegularExpression codeBlockJsonRegex("```json[\\s\\S]*", QRegularExpression::DotMatchesEverythingOption);
     cleaned.remove(codeBlockJsonRegex);
 
+    // Strip XML-format tool calls: <tool>...</tool><arg>...</arg>[<content>...</content>]
+    static QRegularExpression xmlToolRegex(
+        "<tool>[\\s\\S]*?(</content>|</arg>|</tool>|$)",
+        QRegularExpression::DotMatchesEverythingOption
+    );
+    cleaned.remove(xmlToolRegex);
+
+    // Clean up any orphaned XML tags from partial streaming
+    cleaned.remove(QRegularExpression("<tool>[^<]*$"));
+    cleaned.remove(QRegularExpression("<arg>[^<]*$"));
+    cleaned.remove(QRegularExpression("<content>[\\s\\S]*$"));
+
     return cleaned.trimmed();
 }
 

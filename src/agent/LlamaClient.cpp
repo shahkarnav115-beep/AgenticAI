@@ -22,33 +22,19 @@ void LlamaClient::sendChatCompletion(const QList<ChatMessage> &messages, const Q
 
     m_accumulatedText.clear();
 
-    // Prepend System Prompt instructing model to use tools and informing it of active workspace folder
-    QString activeWs = m_workspacePath.isEmpty() ? QDir::homePath() : m_workspacePath;
-    QString wsListing;
-    QDir wsDir(activeWs);
-    if (wsDir.exists()) {
-        QFileInfoList entries = wsDir.entryInfoList(QDir::NoDotAndDotDot | QDir::AllEntries);
-        int maxEntries = qMin(entries.size(), 20);
-        for (int i = 0; i < maxEntries; ++i) {
-            const auto &info = entries[i];
-            wsListing += (info.isDir() ? " - [DIR] " : " - [FILE] ") + info.fileName() + "\n";
-        }
-        if (entries.size() > 20) {
-            wsListing += " - ... (" + QString::number(entries.size() - 20) + " more items)\n";
+    // Extract the latest user message for relevance-based context injection
+    QString latestUserQuery;
+    for (int i = messages.size() - 1; i >= 0; --i) {
+        if (messages[i].role == "user") {
+            latestUserQuery = messages[i].content;
+            break;
         }
     }
 
+    // Build enhanced system prompt with full project context
     QJsonObject sysObj;
     sysObj["role"] = "system";
-    sysObj["content"] = "You are AgenticAI, a helpful AI assistant.\n"
-                        "Active Workspace: '" + activeWs + "'\n"
-                        "Files:\n" + (wsListing.isEmpty() ? " - (empty)\n" : wsListing) +
-                        "\nRULES:\n"
-                        "1. For greetings or chat ('hi','hello'), reply with plain text. NO tools.\n"
-                        "2. To list files, use: {\"tool\": \"list_dir\", \"parameters\": {\"path\": \"" + activeWs + "\"}}\n"
-                        "3. To read a file, use: {\"tool\": \"read_file\", \"parameters\": {\"path\": \"filename\"}}\n"
-                        "4. NEVER use generate_docx or generate_pdf unless user asks to create a document.\n"
-                        "5. All file paths must be inside the active workspace.";
+    sysObj["content"] = buildSystemPrompt(latestUserQuery);
     msgArray.append(sysObj);
 
     for (const auto &msg : messages) {
@@ -81,6 +67,76 @@ void LlamaClient::sendChatCompletion(const QList<ChatMessage> &messages, const Q
     connect(m_currentReply, &QNetworkReply::readyRead, this, &LlamaClient::onReadyRead);
     connect(m_currentReply, &QNetworkReply::finished, this, &LlamaClient::onFinished);
     connect(m_currentReply, &QNetworkReply::errorOccurred, this, &LlamaClient::onError);
+}
+
+QString LlamaClient::buildSystemPrompt(const QString &userQuery) const {
+    QString activeWs = m_workspacePath.isEmpty() ? QDir::homePath() : m_workspacePath;
+
+    // --- Workspace Context Block ---
+    // If WorkspaceIndexer is available, use it for rich project context
+    // Otherwise fall back to a simple root listing
+    QString projectContext;
+    if (m_workspaceIndexer && m_workspaceIndexer->fileCount() > 0) {
+        // Dynamic token budget: use ~30% of available space for project context
+        // For small models (2K-4K context), this keeps it tight
+        // For larger models, we inject more
+        int contextBudget = 1024; // Default for small models
+        projectContext = m_workspaceIndexer->buildContextBlock(userQuery, contextBudget);
+    } else {
+        // Fallback: simple root listing (original behavior)
+        QDir wsDir(activeWs);
+        if (wsDir.exists()) {
+            QFileInfoList entries = wsDir.entryInfoList(QDir::NoDotAndDotDot | QDir::AllEntries);
+            int maxEntries = qMin(entries.size(), 20);
+            projectContext += "=== ROOT FILES ===\n";
+            for (int i = 0; i < maxEntries; ++i) {
+                const auto &info = entries[i];
+                projectContext += (info.isDir() ? " - [DIR] " : " - [FILE] ") + info.fileName() + "\n";
+            }
+            if (entries.size() > 20) {
+                projectContext += " - ... (" + QString::number(entries.size() - 20) + " more items)\n";
+            }
+        }
+    }
+
+    // --- Build the system prompt ---
+    QString prompt;
+    prompt += "You are AgenticAI, a helpful AI coding assistant with full access to the user's project workspace.\n\n";
+
+    prompt += "ACTIVE WORKSPACE: '" + activeWs + "'\n\n";
+
+    // Inject project context
+    if (!projectContext.isEmpty()) {
+        prompt += projectContext + "\n";
+    }
+
+    // --- Tool instructions ---
+    // Dual format: XML tags for small models, JSON for larger models
+    prompt += "=== AVAILABLE TOOLS ===\n"
+              "You can use tools to interact with the workspace. Use EXACTLY one of these formats:\n\n"
+              "FORMAT A (preferred, simpler):\n"
+              "<tool>read_file</tool><arg>relative/path/to/file</arg>\n"
+              "<tool>list_dir</tool><arg>relative/path/to/dir</arg>\n"
+              "<tool>write_file</tool><arg>relative/path/to/file</arg><content>file content here</content>\n"
+              "<tool>run_command</tool><arg>command string</arg>\n"
+              "<tool>generate_pdf</tool><arg>output.pdf</arg><content>markdown content</content>\n"
+              "<tool>generate_docx</tool><arg>output.docx</arg><content>markdown content</content>\n"
+              "<tool>generate_image</tool><arg>output.png</arg><content>image description prompt</content>\n"
+              "<tool>open_ide</tool>\n\n"
+              "FORMAT B (JSON, also accepted):\n"
+              "{\"tool\": \"read_file\", \"parameters\": {\"path\": \"relative/path/to/file\"}}\n\n";
+
+    // --- Rules ---
+    prompt += "RULES:\n"
+              "1. For simple greetings or chat ('hi','hello'), reply with plain text. Do NOT use tools.\n"
+              "2. When asked about files, code, or the project, USE THE PROJECT CONTEXT ABOVE FIRST before calling tools.\n"
+              "3. Only use tools when you need information NOT already provided in the context above.\n"
+              "4. All file paths must be relative to the active workspace unless absolute.\n"
+              "5. NEVER use generate_pdf, generate_docx, or generate_image unless the user explicitly asks to create a document or image.\n"
+              "6. When using a tool, output ONLY the tool call with no extra text before or after.\n"
+              "7. After receiving tool results, provide a clear answer based on those results.\n";
+
+    return prompt;
 }
 
 void LlamaClient::onReadyRead() {
@@ -145,7 +201,9 @@ void LlamaClient::onFinished() {
         m_currentReply->deleteLater();
         m_currentReply = nullptr;
     }
+    // Check both JSON and XML tool call formats
     checkForTextToolCalls();
+    checkForXmlToolCalls();
     emit completionFinished();
 }
 
@@ -235,4 +293,52 @@ void LlamaClient::checkForTextToolCalls() {
             }
         }
     }
+}
+
+void LlamaClient::checkForXmlToolCalls() {
+    if (!m_toolRegistry || m_accumulatedText.isEmpty()) return;
+
+    // Known valid tool names
+    static const QStringList validTools = {"read_file", "write_file", "list_dir", "run_command",
+                                            "generate_pdf", "generate_docx", "generate_image",
+                                            "open_ide", "OPEN_THE_IDE"};
+
+    // Parse XML-tag format: <tool>name</tool><arg>value</arg>[<content>...</content>]
+    static QRegularExpression toolRegex(
+        "<tool>\\s*([^<]+?)\\s*</tool>"           // Capture tool name
+        "(?:\\s*<arg>\\s*([^<]*?)\\s*</arg>)?"     // Optional: capture arg
+        "(?:\\s*<content>([\\s\\S]*?)</content>)?", // Optional: capture content
+        QRegularExpression::DotMatchesEverythingOption
+    );
+
+    QRegularExpressionMatchIterator it = toolRegex.globalMatch(m_accumulatedText);
+    if (!it.hasNext()) return;
+
+    QRegularExpressionMatch match = it.next();
+    QString toolName = match.captured(1).trimmed();
+    QString arg = match.captured(2).trimmed();
+    QString content = match.captured(3); // Preserve whitespace in content
+
+    if (toolName.isEmpty() || !validTools.contains(toolName, Qt::CaseInsensitive)) return;
+
+    // Build args object compatible with ToolRegistry::executeTool
+    QJsonObject argsObj;
+
+    if (toolName == "run_command") {
+        argsObj["command"] = arg;
+    } else if (toolName == "open_ide" || toolName == "OPEN_THE_IDE") {
+        // No args needed
+    } else {
+        argsObj["path"] = arg;
+        if (!content.isNull() && !content.isEmpty()) {
+            argsObj["content"] = content;
+        }
+        // For generate_image, content is the prompt
+        if (toolName == "generate_image" && !content.isEmpty()) {
+            argsObj["prompt"] = content;
+        }
+    }
+
+    QString result = m_toolRegistry->executeTool(toolName, argsObj);
+    emit toolCallDetected(toolName, result);
 }

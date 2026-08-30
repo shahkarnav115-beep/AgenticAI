@@ -15,12 +15,18 @@ ChatWidget::ChatWidget(QWidget *parent)
       m_llamaClient(new LlamaClient(this)),
       m_llamaManager(new LlamaManager(this)),
       m_toolRegistry(new ToolRegistry(this)),
+      m_workspaceIndexer(new WorkspaceIndexer(this)),
       m_ideWidget(new IdeWidget(nullptr))
 {
     setupUi();
     applyTheme();
 
     m_llamaClient->setToolRegistry(m_toolRegistry);
+    m_llamaClient->setWorkspaceIndexer(m_workspaceIndexer);
+
+    // Index the default workspace on startup
+    m_workspaceIndexer->setWorkspacePath(m_toolRegistry->workspacePath());
+    m_llamaClient->setWorkspacePath(m_toolRegistry->workspacePath());
 
     connect(m_llamaClient, &LlamaClient::tokenReceived, this, &ChatWidget::onTokenReceived);
     connect(m_llamaClient, &LlamaClient::toolCallDetected, this, &ChatWidget::onToolCallDetected);
@@ -52,10 +58,11 @@ void ChatWidget::setupUi() {
     connect(m_ideWidget, &IdeWidget::workspaceChanged, this, [this](const QString &folderPath) {
         if (m_toolRegistry) m_toolRegistry->setWorkspacePath(folderPath);
         if (m_llamaClient) m_llamaClient->setWorkspacePath(folderPath);
+        if (m_workspaceIndexer) m_workspaceIndexer->setWorkspacePath(folderPath);
 
         // Clear any stale system/tool history referencing old build folders
         m_chatHistory.clear();
-        appendAssistantMessage("📂 **Active Workspace Updated**: Locked onto directory `" + folderPath + "`.");
+        appendAssistantMessage("📂 **Active Workspace Updated**: Locked onto directory `" + folderPath + "` (" + QString::number(m_workspaceIndexer ? m_workspaceIndexer->fileCount() : 0) + " files indexed).");
     });
     m_mainSplitter->addWidget(m_ideWidget);
 
@@ -607,6 +614,7 @@ void ChatWidget::onSendClicked() {
     m_sendButton->setEnabled(false);
     m_currentAssistantBubble = nullptr;
     m_currentAssistantText = "";
+    m_toolLoopCount = 0; // Reset agentic loop counter on new user message
 
     m_llamaClient->sendChatCompletion(m_chatHistory, "default");
 }
@@ -762,6 +770,16 @@ void ChatWidget::onToolCallDetected(const QString &toolName, const QString &resu
 
     // Feed real tool output back to LLM context so it generates truthful answers
     m_chatHistory.append({"user", "[Tool Output for " + toolName + "]:\n" + result});
+
+    // Agentic loop: allow multi-step tool chaining up to MAX_TOOL_LOOPS
+    m_toolLoopCount++;
+    if (m_toolLoopCount >= MAX_TOOL_LOOPS) {
+        appendAssistantMessage("⚠️ **Agentic Loop Limit**: Reached maximum of " + QString::number(MAX_TOOL_LOOPS) + " consecutive tool calls. Stopping to avoid infinite loop.");
+        m_sendButton->setEnabled(true);
+        m_toolLoopCount = 0;
+        return;
+    }
+
     m_sendButton->setEnabled(false);
     m_currentAssistantBubble = nullptr;
     m_currentAssistantText = "";

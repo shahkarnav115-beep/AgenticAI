@@ -16,6 +16,7 @@
 #include "../agent/LlamaClient.h"
 #include "../agent/LlamaManager.h"
 #include "../agent/ToolRegistry.h"
+#include "../agent/WorkspaceIndexer.h"
 #include "../continuous_thinking/ContinuousThinkingEngine.h"
 #include "IdeWidget.h"
 
@@ -75,7 +76,11 @@ private:
     LlamaClient *m_llamaClient{nullptr};
     LlamaManager *m_llamaManager{nullptr};
     ToolRegistry *m_toolRegistry{nullptr};
+    WorkspaceIndexer *m_workspaceIndexer{nullptr};
     IdeWidget *m_ideWidget{nullptr};
+
+    int m_toolLoopCount{0};
+    static constexpr int MAX_TOOL_LOOPS = 5;
 
     QList<ChatMessage> m_chatHistory;
     QLabel *m_currentAssistantBubble{nullptr};

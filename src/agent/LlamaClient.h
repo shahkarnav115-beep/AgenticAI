@@ -9,6 +9,7 @@
 #include <QJsonArray>
 
 #include "ToolRegistry.h"
+#include "WorkspaceIndexer.h"
 
 struct ChatMessage {
     QString role;
@@ -24,6 +25,7 @@ public:
 
     void setServerUrl(const QString &url) { m_serverUrl = url; }
     void setToolRegistry(ToolRegistry *registry) { m_toolRegistry = registry; }
+    void setWorkspaceIndexer(WorkspaceIndexer *indexer) { m_workspaceIndexer = indexer; }
     void setWorkspacePath(const QString &path) { m_workspacePath = path; }
     void sendChatCompletion(const QList<ChatMessage> &messages, const QString &model = "default");
     void fetchModelProperties();
@@ -42,10 +44,13 @@ private slots:
 
 private:
     void checkForTextToolCalls();
+    void checkForXmlToolCalls();
+    QString buildSystemPrompt(const QString &userQuery) const;
 
     QNetworkAccessManager m_networkManager;
     QNetworkReply *m_currentReply{nullptr};
     ToolRegistry *m_toolRegistry{nullptr};
+    WorkspaceIndexer *m_workspaceIndexer{nullptr};
     QString m_serverUrl{"http://127.0.0.1:8080/v1/chat/completions"};
     QString m_workspacePath;
     QByteArray m_buffer;
