@@ -9,6 +9,8 @@ on:
 jobs:
   build-and-release:
     runs-on: windows-latest
+    permissions:
+      contents: write
 
     steps:
       - name: Checkout repository
@@ -53,11 +55,17 @@ jobs:
               exit 1
           }
 
-          # Find and copy llama-server executable if present
+          # Find and copy llama-server executable and its companion DLLs if present
           $llamaExe = Get-ChildItem -Path build -Recurse -Filter "llama-server.exe" | Select-Object -First 1
           if ($llamaExe) {
               Write-Host "Found llama-server.exe at: $($llamaExe.FullName)"
               Copy-Item $llamaExe.FullName -Destination dist/
+
+              # Copy companion DLLs located in llama-server's directory (e.g. ggml.dll, llama.dll, etc.)
+              Get-ChildItem -Path $llamaExe.DirectoryName -Filter "*.dll" | ForEach-Object {
+                  Write-Host "Copying llama companion DLL: $($_.Name)"
+                  Copy-Item $_.FullName -Destination dist/
+              }
           }
 
           # Run windeployqt automatically to bundle Qt DLLs & plugins
