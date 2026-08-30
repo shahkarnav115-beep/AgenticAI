@@ -29,6 +29,7 @@ public:
     void setWorkspacePath(const QString &path) { m_workspacePath = path; }
     void sendChatCompletion(const QList<ChatMessage> &messages, const QString &model = "default");
     void fetchModelProperties();
+    void abortCurrentRequest();
 
 signals:
     void tokenReceived(const QString &token);

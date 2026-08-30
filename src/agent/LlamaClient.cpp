@@ -237,6 +237,16 @@ void LlamaClient::onError(QNetworkReply::NetworkError code) {
     emit errorOccurred("LlamaServer error: " + errStr + " (Is llama-server running on port 8080?)");
 }
 
+void LlamaClient::abortCurrentRequest() {
+    if (m_currentReply) {
+        m_currentReply->abort();
+        m_currentReply->deleteLater();
+        m_currentReply = nullptr;
+    }
+    m_pendingToolName.clear();
+    m_pendingToolArgs.clear();
+}
+
 void LlamaClient::fetchModelProperties() {
     QUrl propsUrl("http://127.0.0.1:8080/props");
     QNetworkRequest req(propsUrl);

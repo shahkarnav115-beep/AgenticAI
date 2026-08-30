@@ -31,8 +31,14 @@ add_executable(AgenticAI
     src/main.cpp
     src/ui/ChatWidget.h
     src/ui/ChatWidget.cpp
+    src/ui/ConversationSidebar.h
+    src/ui/ConversationSidebar.cpp
+    src/ui/SettingsDialog.h
+    src/ui/SettingsDialog.cpp
     src/ui/IdeWidget.h
     src/ui/IdeWidget.cpp
+    src/ui/CodeEditor.h
+    src/ui/CodeEditor.cpp
     src/continuous_thinking/ContinuousThinkingEngine.h
     src/continuous_thinking/ContinuousThinkingEngine.cpp
     src/agent/LlamaClient.h
