@@ -1,0 +1,68 @@
+# ==========================================
+# AgenticAI - .gitignore
+# ==========================================
+
+# --- CMake & Build Directories ---
+/build/
+/build-*/
+/out/
+/bin/
+/lib/
+CMakeCache.txt
+CMakeFiles/
+cmake_install.cmake
+CTestTestfile.cmake
+Makefile
+compile_commands.json
+
+# --- Visual Studio & MSVC Artifacts ---
+.vs/
+*.vcxproj
+*.vcxproj.filters
+*.vcxproj.user
+*.sln
+*.dir/
+*.VC.db
+*.VC.opendb
+*.suo
+*.user
+*.ipch
+*.idb
+*.pdb
+*.ilk
+
+# --- Build Output Directories ---
+/x64/
+/x86/
+/Debug/
+/Release/
+/RelWithDebInfo/
+/MinSizeRel/
+
+# --- Compiled Binaries & Libraries ---
+*.exe
+*.dll
+*.so
+*.dylib
+*.a
+*.lib
+*.obj
+*.o
+
+# --- LLM Models & Heavy AI Assets ---
+*.gguf
+*.bin
+*.onnx
+
+# --- IDE & Editor Settings ---
+.vscode/
+.idea/
+*.swp
+*.swo
+*~
+*.user
+
+# --- OS Generated Files ---
+Thumbs.db
+Desktop.ini
+.DS_Store
