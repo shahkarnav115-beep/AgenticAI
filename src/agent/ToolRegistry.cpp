@@ -234,23 +234,66 @@ QJsonArray ToolRegistry::getToolsJson() const {
 }
 
 QString ToolRegistry::executeTool(const QString &toolName, const QJsonObject &args) {
-    // Parameter normalization for flexible LLM parameter key variants
-    QString path = args.contains("path") ? args["path"].toString()
-                 : (args.contains("name") ? args["name"].toString()
-                 : (args.contains("file") ? args["file"].toString()
-                 : (args.contains("output_file") ? args["output_file"].toString()
-                 : args["filename"].toString())));
+    // --- Parameter normalization for flexible LLM parameter key variants ---
+    // Small models frequently hallucinate parameter names, so we check many variants.
+    static const QStringList pathKeys = {
+        "path", "file_path", "filepath", "file", "filename", "file_name",
+        "name", "target", "target_path", "target_file", "output_file",
+        "output_path", "output", "destination", "dest", "location"
+    };
 
-    QString content = args.contains("content") ? args["content"].toString()
-                    : (args.contains("data") ? args["data"].toString()
-                    : (args.contains("text") ? args["text"].toString()
-                    : args["markdown"].toString()));
+    static const QStringList contentKeys = {
+        "content", "data", "text", "body", "markdown", "html",
+        "file_content", "file_data", "source", "code", "value", "contents"
+    };
+
+    QString path;
+    for (const QString &key : pathKeys) {
+        if (args.contains(key) && !args[key].toString().trimmed().isEmpty()) {
+            path = args[key].toString();
+            break;
+        }
+    }
+
+    QString content;
+    for (const QString &key : contentKeys) {
+        if (args.contains(key) && !args[key].toString().trimmed().isEmpty()) {
+            content = args[key].toString();
+            break;
+        }
+    }
+
+    // Last-resort fallback: if path is still empty, scan all string values in args.
+    // For tools that need a path, the first short string (<260 chars) that looks like
+    // a filename (contains a dot or slash) is used as path; otherwise the first short
+    // string is used. Remaining strings become content.
+    if (path.isEmpty() && !args.isEmpty()) {
+        for (auto it = args.constBegin(); it != args.constEnd(); ++it) {
+            if (!it.value().isString()) continue;
+            QString val = it.value().toString().trimmed();
+            if (val.isEmpty()) continue;
+
+            if (path.isEmpty() && val.length() < 260 &&
+                (val.contains('.') || val.contains('/') || val.contains('\\'))) {
+                path = val;
+            } else if (content.isEmpty()) {
+                content = val;
+            }
+        }
+        // If we found a content but no path, and the content looks like a filename, swap
+        if (path.isEmpty() && !content.isEmpty() && content.length() < 260) {
+            path = content;
+            content.clear();
+        }
+    }
 
     QString prompt = args.contains("prompt") ? args["prompt"].toString() : content;
 
     // Parameter validation guard to prevent invalid tool execution
     if ((toolName == "read_file" || toolName == "write_file" || toolName == "generate_pdf" ||
          toolName == "generate_docx" || toolName == "generate_image") && path.trimmed().isEmpty()) {
+        // Log the actual args for debugging
+        qWarning() << "Tool" << toolName << "missing path. Args received:" << QJsonDocument(args).toJson(QJsonDocument::Compact);
         return "Error: Missing required file path parameter.";
     }
 

@@ -21,6 +21,8 @@ void LlamaClient::sendChatCompletion(const QList<ChatMessage> &messages, const Q
     QJsonArray msgArray;
 
     m_accumulatedText.clear();
+    m_pendingToolName.clear();
+    m_pendingToolArgs.clear();
 
     // Extract the latest user message for relevance-based context injection
     QString latestUserQuery;
@@ -124,7 +126,15 @@ QString LlamaClient::buildSystemPrompt(const QString &userQuery) const {
               "<tool>generate_image</tool><arg>output.png</arg><content>image description prompt</content>\n"
               "<tool>open_ide</tool>\n\n"
               "FORMAT B (JSON, also accepted):\n"
-              "{\"tool\": \"read_file\", \"parameters\": {\"path\": \"relative/path/to/file\"}}\n\n";
+              "IMPORTANT: You MUST use EXACTLY these parameter names: \"path\" and \"content\". Do NOT use \"file_path\", \"filepath\", \"file_name\", \"filename\", \"target\", or any other variant.\n"
+              "{\"tool\": \"read_file\", \"parameters\": {\"path\": \"relative/path/to/file\"}}\n"
+              "{\"tool\": \"write_file\", \"parameters\": {\"path\": \"output.txt\", \"content\": \"file content here\"}}\n"
+              "{\"tool\": \"list_dir\", \"parameters\": {\"path\": \"relative/path/to/dir\"}}\n"
+              "{\"tool\": \"run_command\", \"parameters\": {\"command\": \"echo hello\"}}\n"
+              "{\"tool\": \"generate_pdf\", \"parameters\": {\"path\": \"output.pdf\", \"content\": \"markdown content\"}}\n"
+              "{\"tool\": \"generate_docx\", \"parameters\": {\"path\": \"output.docx\", \"content\": \"markdown content\"}}\n"
+              "{\"tool\": \"generate_image\", \"parameters\": {\"path\": \"output.png\", \"content\": \"image description\"}}\n"
+              "{\"tool\": \"open_ide\", \"parameters\": {}}\n\n";
 
     // --- Rules ---
     prompt += "RULES:\n"
@@ -180,13 +190,13 @@ void LlamaClient::onReadyRead() {
                         for (const auto &tcVal : toolCalls) {
                             QJsonObject tc = tcVal.toObject();
                             QJsonObject func = tc["function"].toObject();
-                            QString toolName = func["name"].toString();
-                            QJsonDocument argsDoc = QJsonDocument::fromJson(func["arguments"].toString().toUtf8());
-                            QJsonObject argsObj = argsDoc.object();
-
-                            if (m_toolRegistry && !toolName.isEmpty()) {
-                                QString result = m_toolRegistry->executeTool(toolName, argsObj);
-                                emit toolCallDetected(toolName, result);
+                            // Accumulate tool name (usually arrives in first chunk)
+                            if (func.contains("name") && !func["name"].toString().isEmpty()) {
+                                m_pendingToolName = func["name"].toString();
+                            }
+                            // Accumulate arguments string (arrives in fragments)
+                            if (func.contains("arguments")) {
+                                m_pendingToolArgs += func["arguments"].toString();
                             }
                         }
                     }
@@ -201,9 +211,22 @@ void LlamaClient::onFinished() {
         m_currentReply->deleteLater();
         m_currentReply = nullptr;
     }
-    // Check both JSON and XML tool call formats
-    checkForTextToolCalls();
-    checkForXmlToolCalls();
+
+    // Execute any accumulated streaming tool_calls first
+    if (m_toolRegistry && !m_pendingToolName.isEmpty()) {
+        QJsonDocument argsDoc = QJsonDocument::fromJson(m_pendingToolArgs.toUtf8());
+        QJsonObject argsObj = argsDoc.object();
+        qDebug() << "Executing streamed tool call:" << m_pendingToolName << "args:" << m_pendingToolArgs;
+        QString result = m_toolRegistry->executeTool(m_pendingToolName, argsObj);
+        emit toolCallDetected(m_pendingToolName, result);
+        m_pendingToolName.clear();
+        m_pendingToolArgs.clear();
+    } else {
+        // Only check text/XML tool calls if no native tool_calls were streamed
+        checkForTextToolCalls();
+        checkForXmlToolCalls();
+    }
+
     emit completionFinished();
 }
 

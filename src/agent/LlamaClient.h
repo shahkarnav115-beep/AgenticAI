@@ -55,6 +55,10 @@ private:
     QString m_workspacePath;
     QByteArray m_buffer;
     QString m_accumulatedText;
+
+    // Accumulate streamed tool_calls data across SSE chunks
+    QString m_pendingToolName;
+    QString m_pendingToolArgs;
 };
 
 #endif // LLAMACLIENT_H
